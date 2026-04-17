@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# Data & runtime
+data/
+*.log
+tmp/
+
+# Uploads & temp
+uploads/
+tmp/
+
+# Config (contains secrets)
+config.json
+!config.json.example
+
+# 本地环境变量（素材目录路径等）
+.env
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# YOLOv8 models (large binary)
+*.pt
+runs/
+
+# Legacy backend uploads
+backend/uploads/
+
+# Runtime logs & debug
+logs/
+data/publish_debug.log
+
+# Claude Code
+/.claude/settings.local.json
+/.pytest_cache
+
+# Plugin overlay (private distribution)
+_plugin/

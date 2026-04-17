@@ -1,0 +1,43 @@
+{
+  "_说明": "OmniPublish V2.0 配置文件 — 复制为 config.json 后使用",
+  "_注意": "此为公开版模板，CMS 配置请从预装包获取完整版 config.json",
+
+  "api_base": "https://api.openai.com/v1",
+  "api_key": "",
+  "cw_model": "gpt-4o",
+
+  "project_list_url": "",
+
+  "crypto": {
+    "appkey": "",
+    "aes_key": "",
+    "aes_iv": "",
+    "media_key": "",
+    "media_iv": "",
+    "bundle_id": ""
+  },
+
+  "server": {
+    "port": 9527,
+    "auth_token": "change-me-in-production",
+    "allowed_origins": ["*"],
+    "token_expire_hours": 24
+  },
+
+  "yolo": {
+    "face_model": "yolov8n-face.pt",
+    "general_model": "yolov8n.pt"
+  },
+
+  "defaults": {
+    "img_width": 800,
+    "wm_width": 264,
+    "wm_position": "bottom-right",
+    "wm_opacity": 100,
+    "cover_layout": "triple",
+    "cover_candidates": 3,
+    "video_codec": "auto",
+    "video_bitrate": "2M",
+    "video_fps": 30
+  }
+}

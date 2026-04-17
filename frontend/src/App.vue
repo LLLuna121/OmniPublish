@@ -1,0 +1,256 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from './stores/auth'
+import { usePipelineStore } from './stores/pipeline'
+import { notificationWs } from './api/ws'
+
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
+const pipeline = usePipelineStore()
+
+// Notification bell (H8)
+const notifCount = ref(0)
+const showNotifications = ref(false)
+const notifications = ref<{ id: number; type: string; message: string; time: string }[]>([])
+
+function onNotification(data: any) {
+  if (data.type === 'notification' || data.type === 'task_update' || data.type === 'alert') {
+    notifications.value.unshift({
+      id: Date.now(),
+      type: data.type,
+      message: data.message || data.text || JSON.stringify(data),
+      time: new Date().toLocaleTimeString(),
+    })
+    if (notifications.value.length > 50) notifications.value.pop()
+    notifCount.value++
+  }
+  if (data.type === 'unread_count') {
+    notifCount.value = data.count ?? 0
+  }
+}
+
+function clearNotifications() {
+  notifCount.value = 0
+  notifications.value = []
+  showNotifications.value = false
+}
+
+function closeNotifPanel(e: Event) {
+  const target = e.target as HTMLElement
+  if (!target.closest('.notif-bell') && !target.closest('.notif-panel')) {
+    showNotifications.value = false
+  }
+}
+
+const isLoginPage = computed(() => route.name === 'login')
+
+interface NavItem {
+  name: string
+  label: string
+  icon: string
+  badge?: string
+  admin?: boolean
+}
+interface NavGroup {
+  section: string
+  items: NavItem[]
+}
+
+const navItems: NavGroup[] = [
+  { section: '核心', items: [
+    { name: 'dashboard', label: '工作台', icon: '📊' },
+    { name: 'pipeline', label: '新建发帖任务', icon: '🚀', badge: 'New' },
+    { name: 'tasks', label: '任务看板', icon: '📋' },
+  ]},
+  { section: '数据', items: [
+    { name: 'analytics', label: '数据统计', icon: '📈' },
+  ]},
+  { section: '工具', items: [
+    { name: 'toolbox', label: '工具箱', icon: '🧰' },
+  ]},
+  { section: '管理', items: [
+    { name: 'platforms', label: '业务线管理', icon: '⚙️', admin: true },
+    { name: 'accounts', label: '账号管理', icon: '🔑', admin: true },
+  ]},
+]
+
+const pageTitle = computed(() => {
+  const map: Record<string, string> = {
+    dashboard: '工作台', pipeline: '新建发帖任务', 'pipeline-detail': '发帖任务详情', tasks: '任务看板',
+    analytics: '数据统计', toolbox: '工具箱', platforms: '业务线管理', accounts: '账号管理',
+  }
+  return map[route.name as string] || 'OmniPublish'
+})
+
+function navigate(name: string) {
+  if (name === 'pipeline') {
+    // 新建发帖：重置 store 并清除草稿，确保从第一步开始
+    const ps = usePipelineStore()
+    ps.clearDraft()
+    ps.reset()
+  }
+  router.push({ name })
+}
+
+function logout() {
+  auth.logout()
+  router.push('/login')
+}
+
+onMounted(async () => {
+  if (auth.token) {
+    await auth.fetchMe()
+    notificationWs.connect(auth.token)
+    notificationWs.on('*', onNotification)
+  }
+  document.addEventListener('click', closeNotifPanel)
+})
+
+onUnmounted(() => {
+  notificationWs.off('*', onNotification)
+  document.removeEventListener('click', closeNotifPanel)
+})
+</script>
+
+<template>
+  <!-- Login page: no layout -->
+  <router-view v-if="isLoginPage" />
+
+  <!-- App layout -->
+  <div v-else style="display:flex;min-height:100vh">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div style="font-size:17px;font-weight:800;color:var(--primary)">OmniPublish</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px">V2.0 · 全链路发帖工作台</div>
+      </div>
+
+      <template v-for="group in navItems" :key="group.section">
+        <div class="nav-section">{{ group.section }}</div>
+        <template v-for="item in group.items" :key="item.name">
+          <div v-if="!item.admin || auth.isAdmin"
+               class="nav-item" :class="{ active: route.name === item.name || (item.name === 'pipeline' && route.name === 'pipeline-detail') }"
+               @click="navigate(item.name)">
+            <span class="nav-icon">{{ item.icon }}</span>
+            {{ item.label }}
+            <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+          </div>
+        </template>
+      </template>
+
+      <div style="flex:1" />
+      <div class="sidebar-footer">
+        <div>服务状态：<span style="color:var(--green)">● 在线</span></div>
+        <div style="margin-top:4px">👤 {{ auth.user?.display_name || '—' }} · {{ auth.user?.dept || '' }}</div>
+        <div style="margin-top:2px;color:var(--t3);cursor:pointer" @click="logout">退出登录</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main-content">
+      <div class="topbar">
+        <span style="font-size:16px;font-weight:700">{{ pageTitle }}</span>
+        <div style="display:flex;align-items:center;gap:14px">
+          <span style="font-size:12px;color:var(--t2)">👤 {{ auth.user?.display_name || '' }}</span>
+          <div class="notif-bell" @click.stop="showNotifications = !showNotifications">
+            🔔<span v-if="notifCount > 0" class="notif-badge">{{ notifCount > 99 ? '99+' : notifCount }}</span>
+          </div>
+          <button class="btn btn-primary" @click="navigate('pipeline')">＋ 新建发帖任务</button>
+        </div>
+        <!-- Notification Panel -->
+        <div v-if="showNotifications" class="notif-panel" @click.stop>
+          <div class="notif-panel-header">
+            <span style="font-weight:600;font-size:13px">通知</span>
+            <span v-if="notifications.length" class="notif-clear" @click="clearNotifications">清空</span>
+          </div>
+          <div class="notif-panel-body">
+            <div v-if="!notifications.length" style="padding:24px;text-align:center;color:var(--t3);font-size:12px">暂无通知</div>
+            <div v-for="n in notifications" :key="n.id" class="notif-item">
+              <div class="notif-msg">{{ n.message }}</div>
+              <div class="notif-time">{{ n.time }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 全局上传进度条 — 切换页面也可见 -->
+      <div v-if="pipeline.isUploading || (pipeline.taskId && pipeline.currentStep > 0 && pipeline.status === 'running')"
+           class="global-progress-bar">
+        <div v-if="pipeline.isUploading" style="display:flex;align-items:center;gap:12px;padding:8px 28px;background:rgba(79,195,247,.06);border-bottom:1px solid var(--bd)">
+          <span style="font-size:12px;color:var(--primary);font-weight:600;white-space:nowrap">⬆️ 素材上传中</span>
+          <div style="flex:1;height:6px;background:var(--bg4);border-radius:3px;overflow:hidden">
+            <div style="height:100%;border-radius:3px;background:var(--primary);transition:width .3s" :style="{width: pipeline.uploadProgress + '%'}" />
+          </div>
+          <span style="font-size:11px;color:var(--t2);min-width:40px;text-align:right">{{ pipeline.uploadProgress }}%</span>
+          <span v-if="pipeline.taskNo" style="font-size:11px;color:var(--t3);cursor:pointer" @click="navigate('pipeline')">
+            #{{ pipeline.taskNo }} 查看 →
+          </span>
+        </div>
+        <div v-else-if="pipeline.taskId && pipeline.status === 'running'"
+             style="display:flex;align-items:center;gap:12px;padding:6px 28px;background:rgba(129,199,132,.06);border-bottom:1px solid var(--bd);cursor:pointer"
+             @click="navigate('pipeline')">
+          <span style="font-size:12px;color:var(--green);font-weight:600">🚀 任务 #{{ pipeline.taskNo }} 进行中</span>
+          <span style="font-size:11px;color:var(--t2)">步骤 {{ pipeline.currentStep + 1 }}/6</span>
+          <span style="font-size:11px;color:var(--primary)">点击查看 →</span>
+        </div>
+      </div>
+
+      <div class="page-container">
+        <router-view />
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.sidebar {
+  width: var(--sidebar-w); background: var(--bg1); border-right: 1px solid var(--bd);
+  display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; overflow-y: auto;
+}
+.sidebar-logo { padding: 20px 18px 16px; border-bottom: 1px solid var(--bd); }
+.nav-section { padding: 14px 0 6px 18px; font-size: 10px; color: var(--t3); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 18px; cursor: pointer;
+  color: var(--t2); font-size: 13px; border-left: 3px solid transparent; transition: .15s; position: relative;
+}
+.nav-item:hover { background: var(--bg3); color: var(--t1); }
+.nav-item.active { color: var(--primary); border-left-color: var(--primary); background: var(--primary-dim); }
+.nav-icon { width: 20px; text-align: center; font-size: 15px; flex-shrink: 0; }
+.nav-badge { position: absolute; right: 14px; background: var(--red); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+.sidebar-footer { padding: 14px 18px; border-top: 1px solid var(--bd); font-size: 11px; color: var(--t3); }
+
+.main-content { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+.topbar {
+  height: 54px; background: var(--bg1); border-bottom: 1px solid var(--bd);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 28px; flex-shrink: 0;
+  position: relative;
+}
+.page-container { padding: 24px 28px 40px; flex: 1; overflow-y: auto; }
+
+/* Notification Bell (H8) */
+.notif-bell { position: relative; cursor: pointer; font-size: 18px; user-select: none; padding: 2px 4px; }
+.notif-bell:hover { filter: brightness(1.2); }
+.notif-badge {
+  position: absolute; top: -6px; right: -8px;
+  background: var(--red); color: #fff; font-size: 10px; font-weight: 700;
+  min-width: 16px; height: 16px; line-height: 16px; text-align: center;
+  border-radius: 10px; padding: 0 4px;
+}
+.notif-panel {
+  position: absolute; top: 54px; right: 28px; width: 320px; max-height: 400px;
+  background: var(--bg1); border: 1px solid var(--bd); border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.35); z-index: 200; overflow: hidden;
+}
+.notif-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--bd);
+}
+.notif-clear { font-size: 11px; color: var(--primary); cursor: pointer; }
+.notif-clear:hover { text-decoration: underline; }
+.notif-panel-body { max-height: 340px; overflow-y: auto; }
+.notif-item { padding: 10px 16px; border-bottom: 1px solid var(--bd); }
+.notif-item:last-child { border-bottom: none; }
+.notif-msg { font-size: 12px; color: var(--t1); line-height: 1.4; }
+.notif-time { font-size: 10px; color: var(--t3); margin-top: 4px; }
+</style>
