@@ -73,6 +73,23 @@ class WatermarkService:
 
     async def process_all_platforms(self, task_id: int, overrides: list = None):
         """确认后并行处理所有平台的水印。overrides 可覆盖各平台默认水印参数。"""
+        try:
+            await self._do_process_all_platforms(task_id, overrides)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            try:
+                await pipeline_service.update_step_status(
+                    task_id, step=4, status="failed", error=f"水印处理崩溃: {e}"
+                )
+                await pipeline_service.add_log(
+                    task_id, f"水印处理异常终止: {e}", step=4, level="error"
+                )
+            except Exception:
+                pass
+
+    async def _do_process_all_platforms(self, task_id: int, overrides: list = None):
+        """水印处理核心逻辑。"""
         await pipeline_service.update_step_status(task_id, step=4, status="running")
         await pipeline_service.add_log(task_id, "开始并行水印处理", step=4)
 
@@ -306,7 +323,10 @@ class WatermarkService:
                         step=4, platform_id=platform_id
                     )
 
-                    await asyncio.to_thread(video_watermark_cmd, vid_args)
+                    await asyncio.wait_for(
+                        asyncio.to_thread(video_watermark_cmd, vid_args),
+                        timeout=600,  # 10 分钟超时
+                    )
 
                     # 统计输出的视频数
                     vid_exts = {".mp4", ".mov", ".avi", ".mkv"}
@@ -366,9 +386,24 @@ class WatermarkService:
             from services.publish_service import publish_service
             await publish_service.publish_platforms(task_id)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             await pipeline_service.add_log(
                 task_id, f"自动发布触发失败: {e}", step=5, level="error"
             )
+            # 标记步骤 5 为失败，避免任务永远卡在 running
+            try:
+                await pipeline_service.update_step_status(
+                    task_id, step=5, status="failed", error=str(e)
+                )
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE tasks SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+                        task_id,
+                    )
+            except Exception:
+                pass
 
 
 watermark_service = WatermarkService()
